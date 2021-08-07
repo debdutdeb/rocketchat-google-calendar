@@ -21,14 +21,24 @@ import (
 	"google.golang.org/api/option"
 )
 
-func getClient(config *oauth2.Config) *http.Client {
+func getClient(credentialsFile string) (*http.Client, error) {
+	b, err := ioutil.ReadFile(credentialsFile)
+	if err != nil {
+		return nil, fmt.Errorf("unable to read client secret file: %v", err)
+	}
+
+	config, err := google.ConfigFromJSON(b, calendar.CalendarReadonlyScope)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse client secret file to config: %v", err)
+	}
+
 	tokFile := "token.json"
 	tok, err := tokenFromFile(tokFile)
 	if err != nil {
 		tok = getTokenFromWeb(config)
 		saveToken(tokFile, tok)
 	}
-	return config.Client(context.Background(), tok)
+	return config.Client(context.Background(), tok), nil
 }
 
 func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
@@ -69,22 +79,12 @@ func saveToken(path string, token *oauth2.Token) {
 	json.NewEncoder(f).Encode(token)
 }
 
-func getEvents(credentialsFile string, calendarIds []string, dueInMinutes time.Duration) ([]*calendar.Event, error) {
+func getEvents(client *http.Client, calendarIds []string, dueInMinutes time.Duration) ([]*calendar.Event, error) {
 
 	var events []*calendar.Event
 	now := time.Now()
 
 	ctx := context.Background()
-	b, err := ioutil.ReadFile(credentialsFile)
-	if err != nil {
-		return nil, fmt.Errorf("unable to read client secret file: %v", err)
-	}
-
-	config, err := google.ConfigFromJSON(b, calendar.CalendarReadonlyScope)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse client secret file to config: %v", err)
-	}
-	client := getClient(config)
 
 	srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
@@ -143,10 +143,11 @@ func main() {
 		eventInMax string
 		duration time.Duration
 		err      error
+		client   *http.Client
 	)
 	flag.StringVar(&webhookUrl, "webhook", "", "Enter the webhook url you got from Rocket.Chat.")
 	flag.StringVar(&credentialsFile, "credentials", "credentials.json", "Enter path to the credentials file.")
-	flag.StringVar(&waitFor, "waitfor", "5m", "Time to wait before attempting POST to Rocket.Chat webhook. 'm', s', 'h' suffixes available.")
+	flag.StringVar(&waitFor, "waitfor", "5m", "Time to wait before attempting a POST to Rocket.Chat webhook.")
 	flag.StringVar(&eventInMax, "eventin", "30m", "The upper limit of upcoming event start time. Lower bound is the moment of API access.")
 	flag.StringVar(&calendarIds, "calendars", "primary", "List of calendar IDs, separated by commas.")
 	flag.Parse()
@@ -163,10 +164,15 @@ func main() {
 	if duration, err = time.ParseDuration(eventInMax); err != nil {
 		log.Fatalf("Incorrect duration format: %v", err)
 	}
+
+	if client, err = getClient(credentialsFile); err != nil {
+		log.Fatalf("Failed to capture client: %v", err)
+	}
+
 	for {
 		<-ticker.C
 
-		events, err := getEvents(credentialsFile, strings.Split(calendarIds, ","), duration)
+		events, err := getEvents(client, strings.Split(calendarIds, ","), duration)
 		if err != nil {
 			log.Fatalf("ERROR: %v", err)
 		}
