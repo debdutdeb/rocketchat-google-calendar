@@ -176,6 +176,10 @@ func main() {
 	flag.IntVar(&eventInMax, "eventin", 30, "The upper limit of upcoming event start time (in minutes, defaults to 30). Lower bound is the time of API access.")
 	flag.Parse()
 
+	if webhookUrl == "" {
+		log.Fatal("[ERROR] You must pass a webhook url. Read more: https://docs.rocket.chat/guides/rocket.chat-administrator-guides/administration/integrations/google-calendar")
+	}
+
 	ticker := time.NewTicker(getTime(waitFor))
 	for {
 		<-ticker.C
