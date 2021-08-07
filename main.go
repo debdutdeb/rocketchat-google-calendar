@@ -1,14 +1,19 @@
+/* Some of the code is copied from - https://developers.google.com/calendar/api/quickstart/go */
+
 package main
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -16,6 +21,37 @@ import (
 	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"
 )
+
+func extractNumber(str string) int {
+	num, err := strconv.Atoi(strings.TrimRightFunc(str, func(r rune) bool {
+		if r == 'm' || r == 's' || r == 'h' {
+			return true
+		}
+		return false
+	}))
+	if err != nil {
+		log.Fatal(err)
+	}
+	return num
+}
+
+func getTime(waitFor string) time.Duration {
+	switch waitFor[len(waitFor)-1] {
+	case 'm':
+		return time.Duration(extractNumber(waitFor)) * time.Minute
+	case 's':
+		return time.Duration(extractNumber(waitFor)) * time.Second
+	case 'h':
+		return time.Duration(extractNumber(waitFor)) * time.Hour
+	default:
+		if num, err := strconv.Atoi(waitFor); err != nil {
+			log.Fatal(err)
+		} else {
+			return time.Duration(num) * time.Second
+		}
+	}
+	return 0
+}
 
 func getClient(config *oauth2.Config) *http.Client {
 	tokFile := "token.json"
@@ -65,13 +101,13 @@ func saveToken(path string, token *oauth2.Token) {
 	json.NewEncoder(f).Encode(token)
 }
 
-func getEvents(dueInMinutes time.Duration) ([]*calendar.Event, error) {
+func getEvents(credentialsFile string, dueInMinutes time.Duration) ([]*calendar.Event, error) {
 
 	var events []*calendar.Event
 	now := time.Now()
 
 	ctx := context.Background()
-	b, err := ioutil.ReadFile("credentials.json")
+	b, err := ioutil.ReadFile(credentialsFile)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read client secret file: %v", err)
 	}
@@ -112,28 +148,44 @@ func getEvents(dueInMinutes time.Duration) ([]*calendar.Event, error) {
 	return events, nil
 }
 
-func main() {
-
-	webhookUrl := os.Args[1]
-
-	events, err := getEvents(time.Minute * time.Duration(30))
-
-	if err != nil {
-		log.Fatalf("ERROR: %v", err)
-	}
-
+func do(events []*calendar.Event, webhookUrl string) {
 	if len(events) > 0 {
-		var data []byte
 		for _, event := range events {
-			data, err = event.MarshalJSON()
+			data, err := event.MarshalJSON()
 			if err != nil {
 				log.Fatalf("failed to create json: %v", err)
 			}
-			fmt.Println(string(data))
 			_, err = http.Post(webhookUrl, "application/json", bytes.NewBuffer(data))
 			if err != nil {
 				log.Fatalf("ERROR: %v", err)
 			}
 		}
 	}
+}
+
+func main() {
+	var (
+		webhookUrl,
+		credentialsFile,
+		waitFor string
+		eventInMax int
+	)
+	flag.StringVar(&webhookUrl, "webhook", "", "Enter the webhook url you got from Rocket.Chat.")
+	flag.StringVar(&credentialsFile, "credentials", "credentials.json", "Enter path to the credentials file.")
+	flag.StringVar(&waitFor, "waitfor", "5m", "Time to wait before attempting POST to Rocket.Chat webhook. 'm', s', 'h' suffixes available.")
+	flag.IntVar(&eventInMax, "eventin", 30, "The upper limit of upcoming event start time (in minutes, defaults to 30). Lower bound is the time of API access.")
+	flag.Parse()
+
+	ticker := time.NewTicker(getTime(waitFor))
+	for {
+		<-ticker.C
+
+		events, err := getEvents(credentialsFile, time.Minute*time.Duration(eventInMax))
+		if err != nil {
+			log.Fatalf("ERROR: %v", err)
+		}
+
+		do(events, webhookUrl)
+	}
+
 }
