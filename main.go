@@ -12,7 +12,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,37 +20,6 @@ import (
 	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"
 )
-
-func extractNumber(str string) int {
-	num, err := strconv.Atoi(strings.TrimRightFunc(str, func(r rune) bool {
-		if r == 'm' || r == 's' || r == 'h' {
-			return true
-		}
-		return false
-	}))
-	if err != nil {
-		log.Fatal(err)
-	}
-	return num
-}
-
-func getTime(waitFor string) time.Duration {
-	switch waitFor[len(waitFor)-1] {
-	case 'm':
-		return time.Duration(extractNumber(waitFor)) * time.Minute
-	case 's':
-		return time.Duration(extractNumber(waitFor)) * time.Second
-	case 'h':
-		return time.Duration(extractNumber(waitFor)) * time.Hour
-	default:
-		if num, err := strconv.Atoi(waitFor); err != nil {
-			log.Fatal(err)
-		} else {
-			return time.Duration(num) * time.Second
-		}
-	}
-	return 0
-}
 
 func getClient(config *oauth2.Config) *http.Client {
 	tokFile := "token.json"
@@ -101,7 +69,7 @@ func saveToken(path string, token *oauth2.Token) {
 	json.NewEncoder(f).Encode(token)
 }
 
-func getEvents(credentialsFile string, dueInMinutes time.Duration) ([]*calendar.Event, error) {
+func getEvents(credentialsFile string, calendarIds []string, dueInMinutes time.Duration) ([]*calendar.Event, error) {
 
 	var events []*calendar.Event
 	now := time.Now()
@@ -123,28 +91,31 @@ func getEvents(credentialsFile string, dueInMinutes time.Duration) ([]*calendar.
 		return nil, fmt.Errorf("unable to retrieve Calendar client: %v", err)
 	}
 
-	eventsItem, err := srv.Events.List("primary").
-		ShowDeleted(false).
-		ShowHiddenInvitations(false).
-		SingleEvents(true).
-		TimeMin(now.Format(time.RFC3339)).
-		TimeMax(now.Add(dueInMinutes).Format(time.RFC3339)).
-		MaxResults(10).
-		OrderBy("startTime").
-		TimeZone("UTC").
-		Do()
-	if err != nil {
-		return nil, fmt.Errorf("unable to get list of events: %v", err)
-	}
-	{
-		var startTime time.Time
-		for _, event := range eventsItem.Items {
-			startTime, _ = time.Parse(time.RFC3339, event.Start.DateTime)
-			if (startTime.Unix() - now.Unix()) > 0 {
-				events = append(events, event)
+	for _, calendarId := range calendarIds {
+		eventsItem, err := srv.Events.List(calendarId).
+			ShowDeleted(false).
+			ShowHiddenInvitations(false).
+			SingleEvents(true).
+			TimeMin(now.Format(time.RFC3339)).
+			TimeMax(now.Add(dueInMinutes).Format(time.RFC3339)).
+			MaxResults(10).
+			OrderBy("startTime").
+			TimeZone("UTC").
+			Do()
+		if err != nil {
+			return nil, fmt.Errorf("unable to get list of events: %v", err)
+		}
+		{
+			var startTime time.Time
+			for _, event := range eventsItem.Items {
+				startTime, _ = time.Parse(time.RFC3339, event.Start.DateTime)
+				if startTime.Sub(now) > 0 {
+					events = append(events, event)
+				}
 			}
 		}
 	}
+
 	return events, nil
 }
 
@@ -167,24 +138,35 @@ func main() {
 	var (
 		webhookUrl,
 		credentialsFile,
-		waitFor string
-		eventInMax int
+		waitFor,
+		calendarIds,
+		eventInMax string
+		duration time.Duration
+		err      error
 	)
 	flag.StringVar(&webhookUrl, "webhook", "", "Enter the webhook url you got from Rocket.Chat.")
 	flag.StringVar(&credentialsFile, "credentials", "credentials.json", "Enter path to the credentials file.")
 	flag.StringVar(&waitFor, "waitfor", "5m", "Time to wait before attempting POST to Rocket.Chat webhook. 'm', s', 'h' suffixes available.")
-	flag.IntVar(&eventInMax, "eventin", 30, "The upper limit of upcoming event start time (in minutes, defaults to 30). Lower bound is the time of API access.")
+	flag.StringVar(&eventInMax, "eventin", "30m", "The upper limit of upcoming event start time. Lower bound is the moment of API access.")
+	flag.StringVar(&calendarIds, "calendars", "primary", "List of calendar IDs, separated by commas.")
 	flag.Parse()
 
 	if webhookUrl == "" {
 		log.Fatal("[ERROR] You must pass a webhook url. Read more: https://docs.rocket.chat/guides/rocket.chat-administrator-guides/administration/integrations/google-calendar")
 	}
 
-	ticker := time.NewTicker(getTime(waitFor))
+	if duration, err = time.ParseDuration(waitFor); err != nil {
+		log.Fatalf("Incorrect duration format: %v", err)
+	}
+	ticker := time.NewTicker(duration)
+
+	if duration, err = time.ParseDuration(eventInMax); err != nil {
+		log.Fatalf("Incorrect duration format: %v", err)
+	}
 	for {
 		<-ticker.C
 
-		events, err := getEvents(credentialsFile, time.Minute*time.Duration(eventInMax))
+		events, err := getEvents(credentialsFile, strings.Split(calendarIds, ","), duration)
 		if err != nil {
 			log.Fatalf("ERROR: %v", err)
 		}
