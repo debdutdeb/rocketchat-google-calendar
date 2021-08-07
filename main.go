@@ -1,4 +1,4 @@
-/* Some of the code is copied from - https://developers.google.com/calendar/api/quickstart/go */
+/* Some of the code is taken from - https://developers.google.com/calendar/api/quickstart/go */
 
 package main
 
