@@ -100,7 +100,7 @@ func getEvents(client *http.Client, calendarIds []string, dueInMinutes time.Dura
 			TimeMax(now.Add(dueInMinutes).Format(time.RFC3339)).
 			MaxResults(10).
 			OrderBy("startTime").
-			TimeZone("UTC").
+			TimeZone(timeLoc).
 			Do()
 		if err != nil {
 			return nil, fmt.Errorf("unable to get list of events: %v", err)
@@ -140,6 +140,7 @@ func main() {
 		credentialsFile,
 		waitFor,
 		calendarIds,
+        timeLoc,
 		eventInMax string
 		duration time.Duration
 		err      error
@@ -150,6 +151,7 @@ func main() {
 	flag.StringVar(&waitFor, "waitfor", "5m", "Time to wait before attempting a POST to Rocket.Chat webhook.")
 	flag.StringVar(&eventInMax, "eventin", "30m", "The upper limit of upcoming event start time. Lower bound is the moment of API access.")
 	flag.StringVar(&calendarIds, "calendars", "primary", "List of calendar IDs, separated by commas.")
+    flag.StringVar(&timeLoc, "timezone", "America/New_York", "Specify a timezone.")
 	flag.Parse()
 
 	if webhookUrl == "" {
@@ -168,6 +170,10 @@ func main() {
 	if client, err = getClient(credentialsFile); err != nil {
 		log.Fatalf("Failed to capture client: %v", err)
 	}
+
+    if timeLoc, err = time.LoadLocation(timeLoc); err != nil {
+        log.Fatalf("Invalid Timezone Specification", err)
+    }
 
 	for {
 		<-ticker.C
