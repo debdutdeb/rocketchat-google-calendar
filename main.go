@@ -151,7 +151,7 @@ func main() {
 	flag.StringVar(&waitFor, "waitfor", "5m", "Time to wait before attempting a POST to Rocket.Chat webhook.")
 	flag.StringVar(&eventInMax, "eventin", "30m", "The upper limit of upcoming event start time. Lower bound is the moment of API access.")
 	flag.StringVar(&calendarIds, "calendars", "primary", "List of calendar IDs, separated by commas.")
-	flag.StringVar(&timeLoc, "timezone", "America/New_York", "Specify a timezone.")
+	flag.StringVar(&timeLoc, "timezone", "UTC", "Specify a timezone.")
 	flag.Parse()
 
 	if webhookUrl == "" {
@@ -171,16 +171,14 @@ func main() {
 		log.Fatalf("Failed to capture client: %v", err)
 	}
 
-	location, err := time.LoadLocation(timeLoc)
-
-	if err != nil {
+	if _, err = time.LoadLocation(timeLoc); err != nil {
 		panic(err)
 	}
 
 	for {
 		<-ticker.C
 
-		events, err := getEvents(client, strings.Split(calendarIds, ","), duration, location.String())
+		events, err := getEvents(client, strings.Split(calendarIds, ","), duration, timeLoc)
 		if err != nil {
 			log.Fatalf("ERROR: %v", err)
 		}
