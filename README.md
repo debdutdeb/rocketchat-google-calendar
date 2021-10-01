@@ -46,6 +46,8 @@ Use the help option to learn all the command line options and modify its executi
 Usage of ./rocketchat-google-calendar:
   -calendars string
         List of calendar IDs, separated by commas. (default "primary")
+  -timezone string
+        Specify the timezone the start and end dates should be in (default: "America/New_York")
   -credentials string
         Enter path to the credentials file. (default "credentials.json")
   -eventin string

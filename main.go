@@ -79,7 +79,7 @@ func saveToken(path string, token *oauth2.Token) {
 	json.NewEncoder(f).Encode(token)
 }
 
-func getEvents(client *http.Client, calendarIds []string, dueInMinutes time.Duration) ([]*calendar.Event, error) {
+func getEvents(client *http.Client, calendarIds []string, dueInMinutes time.Duration, timeLoc string) ([]*calendar.Event, error) {
 
 	var events []*calendar.Event
 	now := time.Now()
@@ -100,7 +100,7 @@ func getEvents(client *http.Client, calendarIds []string, dueInMinutes time.Dura
 			TimeMax(now.Add(dueInMinutes).Format(time.RFC3339)).
 			MaxResults(10).
 			OrderBy("startTime").
-			TimeZone("UTC").
+			TimeZone(timeLoc).
 			Do()
 		if err != nil {
 			return nil, fmt.Errorf("unable to get list of events: %v", err)
@@ -140,6 +140,7 @@ func main() {
 		credentialsFile,
 		waitFor,
 		calendarIds,
+		timeLoc,
 		eventInMax string
 		duration time.Duration
 		err      error
@@ -150,6 +151,7 @@ func main() {
 	flag.StringVar(&waitFor, "waitfor", "5m", "Time to wait before attempting a POST to Rocket.Chat webhook.")
 	flag.StringVar(&eventInMax, "eventin", "30m", "The upper limit of upcoming event start time. Lower bound is the moment of API access.")
 	flag.StringVar(&calendarIds, "calendars", "primary", "List of calendar IDs, separated by commas.")
+	flag.StringVar(&timeLoc, "timezone", "UTC", "Specify a timezone.")
 	flag.Parse()
 
 	if webhookUrl == "" {
@@ -169,10 +171,14 @@ func main() {
 		log.Fatalf("Failed to capture client: %v", err)
 	}
 
+	if _, err = time.LoadLocation(timeLoc); err != nil {
+		panic(err)
+	}
+
 	for {
 		<-ticker.C
 
-		events, err := getEvents(client, strings.Split(calendarIds, ","), duration)
+		events, err := getEvents(client, strings.Split(calendarIds, ","), duration, timeLoc)
 		if err != nil {
 			log.Fatalf("ERROR: %v", err)
 		}
